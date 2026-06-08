@@ -1,0 +1,175 @@
+blueprint:
+  name: "System Resource Alert"
+  description: >
+    Monitors CPU, RAM, disk, and optionally swap usage on a single
+    monitored host. Alerts when values exceed configurable thresholds.
+    Instantiate once per host — adjust thresholds per-host as needed.
+
+    Swap monitoring: select the host's swap entity to enable. Leave the field
+    at its empty default to disable — an empty list is handled safely.
+  domain: automation
+
+  input:
+
+    # ── CPU ────────────────────────────────────────────────────────────────
+    cpu_entity:
+      name: CPU Usage Entity
+      description: "CPU sensor, e.g. sensor.latitude_cpu"
+      selector:
+        entity:
+          domain: sensor
+
+    cpu_threshold:
+      name: CPU Threshold (%)
+      default: 80
+      selector:
+        number:
+          min: 10
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    cpu_duration:
+      name: CPU Alert Duration (minutes)
+      description: >
+        CPU must stay continuously above the threshold for this long before
+        alerting. Prevents false positives from short-lived spikes.
+      default: 10
+      selector:
+        number:
+          min: 1
+          max: 60
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+
+    # ── RAM ────────────────────────────────────────────────────────────────
+    ram_entity:
+      name: RAM Usage Entity
+      description: "RAM sensor, e.g. sensor.latitude_ram_use_percent"
+      selector:
+        entity:
+          domain: sensor
+
+    ram_threshold:
+      name: RAM Threshold (%)
+      default: 85
+      selector:
+        number:
+          min: 10
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    ram_duration:
+      name: RAM Alert Duration (minutes)
+      default: 5
+      selector:
+        number:
+          min: 1
+          max: 30
+          step: 1
+          unit_of_measurement: min
+          mode: slider
+
+    # ── Disk ───────────────────────────────────────────────────────────────
+    disk_entities:
+      name: Disk Usage Entities
+      description: >
+        Select one or more disk usage sensors — one per mount point you want
+        to monitor. All selected entities share the same threshold below.
+      selector:
+        entity:
+          multiple: true
+          domain: sensor
+
+    disk_threshold:
+      name: Disk Threshold (%)
+      default: 80
+      selector:
+        number:
+          min: 10
+          max: 100
+          step: 5
+          unit_of_measurement: "%"
+          mode: slider
+
+    # ── Swap ───────────────────────────────────────────────────────────────
+    swap_entity:
+      name: Swap Usage Entity (optional)
+      description: >
+        If set, alerts immediately on any swap usage above 0%.
+        Select at most one sensor. Leave blank (empty list) to disable.
+      default: []
+      selector:
+        entity:
+          multiple: true
+          domain: sensor
+
+    # ── Notification ───────────────────────────────────────────────────────
+    notify_service:
+      name: Notification Service
+      description: >
+        Full notify service name.
+        Examples: notify.mobile_app_myphone, notify.telegram
+      default: notify.mobile_app_iphone
+      selector:
+        text:
+
+    notify_link:
+      name: Notification Link (optional)
+      description: >
+        URL to include in the notification for quick access to more info or
+        remediation steps. Optional, but recommended.
+      selector:
+        text:
+
+# ── Triggers ───────────────────────────────────────────────────────────────
+trigger:
+  - id: cpu_high
+    platform: numeric_state
+    entity_id: !input cpu_entity
+    above: !input cpu_threshold
+    for:
+      minutes: !input cpu_duration
+
+  - id: ram_high
+    platform: numeric_state
+    entity_id: !input ram_entity
+    above: !input ram_threshold
+    for:
+      minutes: !input ram_duration
+
+  - id: disk_high
+    platform: numeric_state
+    entity_id: !input disk_entities
+    above: !input disk_threshold
+    # No `for:` — disk fills slowly; alerting on first breach is appropriate.
+
+  - id: swap_active
+    platform: numeric_state
+    entity_id: !input swap_entity
+    above: 0
+    # entity_id: [] when swap_entity is left blank — HA skips this trigger safely.
+
+# ── Variables ──────────────────────────────────────────────────────────────
+variables:
+  _metric: "{% if trigger.id == 'cpu_high' %}CPU{% elif trigger.id == 'ram_high' %}RAM{% elif trigger.id == 'disk_high' %}Disk{% else %}Swap{% endif %}"
+  _entity_name: "{{ state_attr(trigger.entity_id, 'friendly_name') | default(trigger.entity_id, true) }}"
+  _value: "{{ trigger.to_state.state | float(0) | round(1) }}"
+
+# ── Action ─────────────────────────────────────────────────────────────────
+action:
+  - service: !input notify_service
+    data:
+      title: "⚠️ {{ _metric }} Alert"
+      message: >-
+        {{ _entity_name }} is at {{ _value }}%
+        {%- if trigger.id == 'swap_active' %} — any swap usage detected{%- endif %}
+      data:
+        url: !input notify_link
+
+mode: queued
+max: 10

@@ -1,0 +1,79 @@
+
+blueprint:
+  name: Service Notifier
+  description: Add integrations, devices, or services to be notified if they go down.
+  domain: automation
+  input:
+    services:
+      name: Watched Services
+      selector:
+        entity:
+          multiple: true
+    notify_targets:
+      name: Notify Device
+      selector:
+        device:
+          integration: mobile_app
+          multiple: true
+    notification_title:
+      default: Service Notifier
+      name: Notification Title
+      description: Title of the notification sent to the mobile device.
+      selector:
+        text: {}
+    persistent_boolean:
+      default: false
+      name: Persistent Notification
+      description: Create a persistent notification in Home Assistant?
+      selector:
+        boolean: {}
+    timeout:
+      default: 5
+      name: Timeout
+      description: Time in minutes before notification is sent.
+      selector:
+        number:
+          min: 0
+          max: 60
+          unit_of_measurement: minutes
+
+triggers:
+  - trigger: state
+    entity_id: !input services
+    to:
+      - unavailable
+      - unknown
+    for:
+      hours: 0
+      minutes: !input timeout
+      seconds: 0
+
+conditions: []
+
+actions:
+  - repeat:
+      for_each: !input notify_targets
+      sequence:
+        - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
+          data:
+            message: >-
+              {{ device_attr(trigger.to_state.entity_id, 'name') }} status is {{
+              trigger.to_state.state }}. Check it out!
+            title: !input notification_title
+            data:
+              persistent: true
+              tag: critical_service_{{ trigger.to_state.entity_id }}
+              sticky: tru
+  - choose:
+      - conditions:
+          - condition: template
+            value_template: !input persistent_boolean
+        sequence:
+          - action: persistent_notification.create
+            metadata: {}
+            data:
+              message: >-
+                {{ device_attr(trigger.to_state.entity_id, 'name') }} status is {{
+                trigger.to_state.state }}. Check it out!
+              title: !input notification_title
+              notification_id: critical_service_{{ trigger.to_state.entity_id }}
