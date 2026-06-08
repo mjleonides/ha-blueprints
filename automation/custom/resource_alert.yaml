@@ -120,9 +120,7 @@ blueprint:
 
     notify_link:
       name: Notification Link (optional)
-      description: >
-        URL to include in the notification for quick access to more info or
-        remediation steps. Optional, but recommended.
+      default: ""
       selector:
         text:
 
@@ -169,7 +167,7 @@ action:
         {{ _entity_name }} is at {{ _value }}%
         {%- if trigger.id == 'swap_active' %} — any swap usage detected{%- endif %}
       data:
-        url: !input notify_link
+        url: "{% if notify_link != '' %}{{ notify_link }}{% endif %}"
 
 mode: queued
 max: 10
