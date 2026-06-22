@@ -1,40 +1,59 @@
 blueprint:
   name: Service Notifier
-  description: Add integrations, devices, or services to be notified if they go down or recover.
+  description: >-
+    Notify one or more channels when a watched entity goes down, and again
+    when it recovers (including how long it was down). Configure which
+    channels fire in the Down/Recovery Notification Actions inputs below —
+    supports any number of channels (mobile app, ntfy, Discord, Telegram,
+    persistent notification, etc.) since the blueprint simply runs whatever
+    actions you configure for each.
   domain: automation
   input:
     services:
       name: Watched Services
+      description: Entities to monitor for unavailable/unknown state.
       selector:
         entity:
           multiple: true
-    notify_targets:
-      name: Notify Device
-      selector:
-        device:
-          integration: mobile_app
-          multiple: true
-    notification_title:
-      default: Service Notifier
-      name: Notification Title
-      description: Title of the notification sent to the mobile device.
-      selector:
-        text: {}
-    persistent_boolean:
-      default: false
-      name: Persistent Notification
-      description: Create a persistent notification in Home Assistant?
-      selector:
-        boolean: {}
     timeout:
-      default: 5
       name: Timeout
-      description: Time in minutes before notification is sent.
+      description: >-
+        Time in minutes an entity must remain unavailable/unknown before the
+        down notification actions fire.
+      default: 5
       selector:
         number:
           min: 0
           max: 60
           unit_of_measurement: minutes
+    notification_title:
+      name: Notification Title
+      description: >-
+        Title text, available as {{ title }} for use in your down/recovery
+        actions below.
+      default: Service Notifier
+      selector:
+        text: {}
+    down_notification_actions:
+      name: Down Notification Actions
+      description: >-
+        Action(s) to run when a watched entity goes down. Add one action row
+        per channel (mobile app, ntfy, Discord, Telegram, persistent
+        notification, etc.). Reference {{ down_message }} and {{ title }} in
+        your message/title fields. Use {{ trigger.to_state.entity_id }} if
+        you need a unique tag or notification_id.
+      selector:
+        action: {}
+    recovery_notification_actions:
+      name: Recovery Notification Actions
+      description: >-
+        Action(s) to run when a watched entity recovers after being down
+        longer than the timeout. Reference {{ recovery_message }} and
+        {{ title }}. Keep any tag/notification_id consistent with what you
+        used in the down actions if you want them to pair up (e.g. to
+        dismiss a persistent notification or replace a mobile notification).
+      selector:
+        action: {}
 
 triggers:
   - trigger: state
@@ -63,38 +82,25 @@ conditions: []
 actions:
   - variables:
       timeout_minutes: !input timeout
-      use_persistent: !input persistent_boolean
+      title: !input notification_title
+      down_message: >-
+        {{ trigger.to_state.name }} status is {{ trigger.to_state.state }}. Check it out!
+      recovery_message: >-
+        {% set duration = (now() - trigger.from_state.last_changed).total_seconds() | int %}
+        {% set h = duration // 3600 %}
+        {% set m = (duration % 3600) // 60 %}
+        {% set s = duration % 60 %}
+        {{ trigger.to_state.name }} is back online after
+        {{- ' ' + h | string + 'h' if h > 0 else '' }}
+        {{- ' ' + m | string + 'm' if m > 0 else '' }}
+        {{- ' ' + s | string + 's' if h == 0 and m == 0 else '' }}.
   - choose:
       - conditions:
           - condition: trigger
             id: went_down
         sequence:
-          - repeat:
-              for_each: !input notify_targets
-              sequence:
-                - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
-                  data:
-                    message: >-
-                      {{ trigger.to_state.name }} status is {{
-                      trigger.to_state.state }}.
-                    title: !input notification_title
-                    data:
-                      persistent: true
-                      tag: critical_service_{{ trigger.to_state.entity_id }}
-                      sticky: true
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ use_persistent }}"
-                sequence:
-                  - action: persistent_notification.create
-                    data:
-                      message: >-
-                        {{ trigger.to_state.name }} status is {{
-                        trigger.to_state.state }}. Check it out!
-                      title: !input notification_title
-                      notification_id: critical_service_{{ trigger.to_state.entity_id }}
-
+          - choose: []
+            default: !input down_notification_actions
       - conditions:
           - condition: trigger
             id: recovered
@@ -102,32 +108,5 @@ actions:
             value_template: >-
               {{ (now() - trigger.from_state.last_changed).total_seconds() / 60 >= timeout_minutes }}
         sequence:
-          - variables:
-              downtime_message: >-
-                {% set duration = (now() - trigger.from_state.last_changed).total_seconds() | int %}
-                {% set h = duration // 3600 %}
-                {% set m = (duration % 3600) // 60 %}
-                {% set s = duration % 60 %}
-                {% set name = trigger.to_state.name %}
-                {{ name }} is back online after
-                {{- ' ' + h | string + 'h' if h > 0 else '' }}
-                {{- ' ' + m | string + 'm' if m > 0 else '' }}
-                {{- ' ' + s | string + 's' if h == 0 and m == 0 else '' }}.
-          - repeat:
-              for_each: !input notify_targets
-              sequence:
-                - action: "notify.mobile_app_{{ device_attr(repeat.item, 'name') | slugify }}"
-                  data:
-                    message: "{{ downtime_message }}"
-                    title: !input notification_title
-                    data:
-                      tag: critical_service_{{ trigger.to_state.entity_id }}
-                      sticky: true
-          - choose:
-              - conditions:
-                  - condition: template
-                    value_template: "{{ use_persistent }}"
-                sequence:
-                  - action: persistent_notification.dismiss
-                    data:
-                      notification_id: critical_service_{{ trigger.to_state.entity_id }}
+          - choose: []
+            default: !input recovery_notification_actions

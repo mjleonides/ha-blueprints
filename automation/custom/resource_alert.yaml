@@ -109,20 +109,26 @@ blueprint:
           domain: sensor
 
     # ── Notification ───────────────────────────────────────────────────────
-    notify_service:
-      name: Notification Service
-      description: >
-        Full notify service name.
-        Examples: notify.mobile_app_myphone, notify.telegram
-      default: notify.mobile_app_iphone
+    notification_title:
+      name: Notification Title
+      description: >-
+        Title text, available as {{ title }} for use in your notification
+        actions below.
+      default: Resource Alert
       selector:
-        text:
+        text: {}
 
-    notify_link:
-      name: Notification Link (optional)
-      default: ""
+    notification_actions:
+      name: Notification Actions
+      description: >-
+        Action(s) to run when a metric crosses a threshold. Add one action row
+        per channel (mobile app, ntfy, Discord, Telegram, persistent
+        notification, etc.). Reference {{ message }} and {{ title }} in
+        your message/title fields. Use {{ trigger.to_state.entity_id }} if
+        you need a unique tag or notification_id.
       selector:
-        text:
+        action: {}
+
 
 # ── Triggers ───────────────────────────────────────────────────────────────
 trigger:
@@ -154,20 +160,19 @@ trigger:
 
 # ── Variables ──────────────────────────────────────────────────────────────
 variables:
-  _metric: "{% if trigger.id == 'cpu_high' %}CPU{% elif trigger.id == 'ram_high' %}RAM{% elif trigger.id == 'disk_high' %}Disk{% else %}Swap{% endif %}"
-  _entity_name: "{{ state_attr(trigger.entity_id, 'friendly_name') | default(trigger.entity_id, true) }}"
-  _value: "{{ trigger.to_state.state | float(0) | round(1) }}"
+  metric: "{% if trigger.id == 'cpu_high' %}CPU{% elif trigger.id == 'ram_high' %}RAM{% elif trigger.id == 'disk_high' %}Disk{% else %}Swap{% endif %}"
+  entity_name: "{{ state_attr(trigger.entity_id, 'friendly_name') | default(trigger.entity_id, true) }}"
+  value: "{{ trigger.to_state.state | float(0) | round(1) }}"
+  title: !input notification_title
+  message: >-
+    {{ entity_name }} is at {{ value }}%
+    {%- if trigger.id == 'swap_active' %} — any swap usage detected{%- endif %}
 
 # ── Action ─────────────────────────────────────────────────────────────────
 action:
-  - service: !input notify_service
-    data:
-      title: "⚠️ {{ _metric }} Alert"
-      message: >-
-        {{ _entity_name }} is at {{ _value }}%
-        {%- if trigger.id == 'swap_active' %} — any swap usage detected{%- endif %}
-      data:
-        url: "{% if notify_link != '' %}{{ notify_link }}{% endif %}"
+  sequence:
+    - choose: []
+      default: !input notification_actions
 
 mode: queued
 max: 10
